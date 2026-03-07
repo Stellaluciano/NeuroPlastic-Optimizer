@@ -6,7 +6,7 @@ $$
 \theta_{t+1} = \theta_t - \eta \, (\alpha_t \odot g_t)
 $$
 
-where \(g_t = \nabla_{\theta_t}\mathcal{L}(\theta_t)\) is the gradient and \(\alpha_t\) is a plasticity coefficient computed from:
+where $g_t = \nabla_{\theta_t}\mathcal{L}(\theta_t)$ is the gradient and $\alpha_t$ is a plasticity coefficient computed from:
 
 $$
 \alpha_t = \mathrm{clip}_{[\alpha_{\min},\alpha_{\max}]}\!\left(w_a \cdot \hat a_t + w_g \cdot \hat g_t + w_m \cdot \hat m_t\right)
