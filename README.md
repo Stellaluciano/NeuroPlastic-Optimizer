@@ -16,11 +16,15 @@ The project does **not** claim biological fidelity or neuroscience simulation.
 
 NeuroPlastic updates follow:
 
-\[
-\theta_{t+1} = \theta_t - \eta \cdot \alpha_t \odot g_t
-\]
+$$
+\theta_{t+1} = \theta_t - \eta \, (\alpha_t \odot g_t)
+$$
 
-where `alpha_t` combines:
+where \(g_t = \nabla_{\theta_t}\mathcal{L}(\theta_t)\), and \(\alpha_t\) combines:
+
+$$
+\alpha_t = \mathrm{clip}_{[\alpha_{\min},\alpha_{\max}]}\!\left(w_a\hat a_t + w_g\hat g_t + w_m\hat m_t\right)
+$$
 
 1. local activity traces (EMA of `|g_t|`),
 2. gradient magnitude signal,
