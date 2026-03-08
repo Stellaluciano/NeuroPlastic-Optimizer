@@ -191,7 +191,16 @@ def run_experiment(config_path: str) -> dict[str, Any]:
     device = _resolve_device(cfg.device)
     set_seed(cfg.seed)
 
-    train_loader, test_loader = build_dataloaders(cfg.dataset, cfg.batch_size, cfg.num_workers)
+    train_loader, test_loader = build_dataloaders(
+        cfg.dataset,
+        cfg.batch_size,
+        cfg.num_workers,
+        data_root=cfg.data_root,
+        download=cfg.download,
+        pin_memory=cfg.pin_memory,
+        persistent_workers=cfg.persistent_workers,
+        prefetch_factor=cfg.prefetch_factor,
+    )
     model = _make_model(cfg.dataset).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = _make_optimizer(model, cfg, raw)

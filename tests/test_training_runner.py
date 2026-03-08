@@ -37,7 +37,7 @@ def test_run_experiment_resume_from_checkpoint_continues_epoch_and_metric(tmp_pa
 
     epoch_log: list[int] = []
 
-    def fake_build_dataloaders(dataset: str, batch_size: int, num_workers: int):
+    def fake_build_dataloaders(dataset: str, batch_size: int, num_workers: int, **kwargs):
         return [object()], [object()]
 
     def fake_run_epoch(model, loader, criterion, optimizer, device, train: bool):
@@ -107,7 +107,7 @@ def test_run_experiment_resume_from_checkpoint_continues_epoch_and_metric(tmp_pa
 def test_run_experiment_writes_jsonl_events_with_required_fields(tmp_path, monkeypatch):
     from neuroplastic_optimizer.training.runner import run_experiment
 
-    def fake_build_dataloaders(dataset: str, batch_size: int, num_workers: int):
+    def fake_build_dataloaders(dataset: str, batch_size: int, num_workers: int, **kwargs):
         return [object()], [object()]
 
     def fake_run_epoch(model, loader, criterion, optimizer, device, train: bool):
@@ -166,7 +166,7 @@ def test_run_experiment_flushes_metrics_on_exception(tmp_path, monkeypatch):
 
     calls = {"count": 0}
 
-    def fake_build_dataloaders(dataset: str, batch_size: int, num_workers: int):
+    def fake_build_dataloaders(dataset: str, batch_size: int, num_workers: int, **kwargs):
         return [object()], [object()]
 
     def fake_run_epoch(model, loader, criterion, optimizer, device, train: bool):
