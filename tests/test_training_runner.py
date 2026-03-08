@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 import torch
@@ -39,7 +40,7 @@ def test_run_experiment_resume_from_checkpoint_continues_epoch_and_metric(tmp_pa
     def fake_build_dataloaders(dataset: str, batch_size: int, num_workers: int):
         return [object()], [object()]
 
-    def fake_run_epoch(model, loader, criterion, optimizer, device, train: bool):
+    def fake_run_epoch(model, loader, criterion, optimizer, device, train: bool, **kwargs):
         if train:
             optimizer.param_groups[0]["lr"] *= 0.99
             return {"loss": 1.0, "accuracy": 0.2}
@@ -100,3 +101,52 @@ def test_run_experiment_resume_from_checkpoint_continues_epoch_and_metric(tmp_pa
     assert resumed_checkpoint["epoch"] == 4
     assert resumed_checkpoint["best_metric"] == pytest.approx(0.9)
     assert second_summary["best_test_accuracy"] == pytest.approx(0.9)
+
+
+def test_run_epoch_non_finite_loss_writes_failure_snapshot(tmp_path):
+    import torch
+
+    from neuroplastic_optimizer.training.config import ExperimentConfig
+    from neuroplastic_optimizer.training.runner import NonFiniteLossError, _run_epoch
+
+    class TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(4, 2)
+
+        def forward(self, x):
+            return self.linear(x)
+
+    class NaNLoss(torch.nn.Module):
+        def forward(self, logits, target):
+            return logits.sum() * torch.tensor(float("nan"), device=logits.device)
+
+    model = TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    loader = [(torch.randn(3, 4), torch.zeros(3, dtype=torch.long))]
+    cfg = ExperimentConfig(
+        dataset="synthetic_mnist",
+        optimizer="sgd",
+        fail_on_non_finite=True,
+        output_dir=str(tmp_path),
+    )
+    snapshot_path = tmp_path / "failure_snapshot.json"
+
+    with pytest.raises(NonFiniteLossError):
+        _run_epoch(
+            model,
+            loader,
+            NaNLoss(),
+            optimizer,
+            torch.device("cpu"),
+            train=True,
+            cfg=cfg,
+            failure_snapshot_path=snapshot_path,
+        )
+
+    assert snapshot_path.exists()
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert payload["batch_index"] == 0
+    assert payload["lr"] == pytest.approx(0.01)
+    assert payload["grad_norm"] is None
+    assert payload["config_summary"]["fail_on_non_finite"] is True
