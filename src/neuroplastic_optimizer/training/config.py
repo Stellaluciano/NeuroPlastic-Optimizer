@@ -16,6 +16,11 @@ class ExperimentConfig:
     optimizer: str = "neuroplastic"
     seed: int = 42
     num_workers: int = 2
+    data_root: str = "data"
+    download: bool = True
+    pin_memory: bool = False
+    persistent_workers: bool = False
+    prefetch_factor: int | None = None
     output_dir: str = "results"
     checkpoint_dir: str = "checkpoints"
     device: str = "cpu"
@@ -40,6 +45,10 @@ class ExperimentConfig:
             raise ValueError("save_every_n_epochs must be > 0")
         if self.optimizer not in {"neuroplastic", "sgd", "adam", "adamw"}:
             raise ValueError(f"unsupported optimizer: {self.optimizer}")
+        if self.num_workers < 0:
+            raise ValueError("num_workers must be >= 0")
+        if self.prefetch_factor is not None and self.prefetch_factor <= 0:
+            raise ValueError("prefetch_factor must be > 0 when set")
         valid_levels = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
         if self.log_level.upper() not in valid_levels:
             raise ValueError(f"unsupported log_level: {self.log_level}")
