@@ -1,6 +1,6 @@
-from unittest.mock import ANY
-
 import importlib.util
+import json
+from unittest.mock import ANY
 
 import pytest
 
@@ -105,7 +105,7 @@ def test_build_dataloaders_download_false_error_contains_actionable_hint(monkeyp
 
     monkeypatch.setattr(training_data.datasets, "FashionMNIST", fake_fashion_mnist)
 
-    with pytest.raises(RuntimeError, match="请预先下载到 data_root"):
+    with pytest.raises(RuntimeError, match="Download the dataset into data_root"):
         training_data.build_dataloaders(
             dataset="fashionmnist",
             batch_size=16,
@@ -113,3 +113,75 @@ def test_build_dataloaders_download_false_error_contains_actionable_hint(monkeyp
             data_root="missing_data",
             download=False,
         )
+
+
+def test_build_dataloaders_routes_fashionmnist_to_fashion_dataset(monkeypatch):
+    from neuroplastic_optimizer.training import data as training_data
+
+    dataset_calls = []
+
+    def fake_fashion(root, train, download, transform):
+        dataset_calls.append(
+            {
+                "root": root,
+                "train": train,
+                "download": download,
+                "transform": transform,
+            }
+        )
+        return object()
+
+    def fake_loader(dataset, batch_size, shuffle, **kwargs):
+        return object()
+
+    monkeypatch.setattr(training_data.datasets, "FashionMNIST", fake_fashion)
+    monkeypatch.setattr(training_data, "DataLoader", fake_loader)
+
+    training_data.build_dataloaders(
+        dataset="fashionmnist",
+        batch_size=32,
+        num_workers=0,
+        data_root="fashion_data",
+        download=False,
+    )
+
+    assert dataset_calls == [
+        {"root": "fashion_data", "train": True, "download": False, "transform": ANY},
+        {"root": "fashion_data", "train": False, "download": False, "transform": ANY},
+    ]
+
+
+def test_build_dataloaders_applies_train_subset_indices(monkeypatch, tmp_path):
+    from neuroplastic_optimizer.training import data as training_data
+
+    subset_path = tmp_path / "subset.json"
+    subset_path.write_text(json.dumps([1, 3, 5]), encoding="utf-8")
+
+    class FakeDataset:
+        def __len__(self):
+            return 10
+
+        def __getitem__(self, index):
+            return index
+
+    loader_datasets = []
+
+    def fake_mnist(root, train, download, transform):
+        return FakeDataset()
+
+    def fake_loader(dataset, batch_size, shuffle, **kwargs):
+        loader_datasets.append(dataset)
+        return object()
+
+    monkeypatch.setattr(training_data.datasets, "MNIST", fake_mnist)
+    monkeypatch.setattr(training_data, "DataLoader", fake_loader)
+
+    training_data.build_dataloaders(
+        dataset="mnist",
+        batch_size=32,
+        num_workers=0,
+        download=False,
+        train_subset_indices_path=str(subset_path),
+    )
+
+    assert len(loader_datasets[0]) == 3

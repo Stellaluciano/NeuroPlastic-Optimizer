@@ -57,6 +57,9 @@ class AggregateData:
     mean_final_test_loss: float | None
     std_final_test_loss: float | None
     run_count: int
+    mean_epoch_1_accuracy: float | None
+    mean_epoch_3_accuracy: float | None
+    mean_epoch_10_accuracy: float | None
 
 
 def _warn(message: str) -> None:
@@ -378,6 +381,13 @@ def _aggregate_series(
     return mean_values, std_values
 
 
+def _value_at_epoch(series: list[float], epochs: list[int], target_epoch: int) -> float | None:
+    for epoch, value in zip(epochs, series):
+        if epoch == target_epoch and value == value:
+            return value
+    return None
+
+
 def _save_current_figure(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
@@ -537,6 +547,21 @@ def aggregate_seed_runs(runs: list[RunData]) -> list[AggregateData]:
         final_loss_values = [
             run.final_test_loss for run in runs_only if run.final_test_loss is not None
         ]
+        epoch_1_values = [
+            value
+            for value in (_value_at_epoch(run.test_accuracy, run.epochs, 1) for run in runs_only)
+            if value is not None
+        ]
+        epoch_3_values = [
+            value
+            for value in (_value_at_epoch(run.test_accuracy, run.epochs, 3) for run in runs_only)
+            if value is not None
+        ]
+        epoch_10_values = [
+            value
+            for value in (_value_at_epoch(run.test_accuracy, run.epochs, 10) for run in runs_only)
+            if value is not None
+        ]
 
         aggregates.append(
             AggregateData(
@@ -554,6 +579,9 @@ def aggregate_seed_runs(runs: list[RunData]) -> list[AggregateData]:
                 mean_final_test_loss=_mean(final_loss_values) if final_loss_values else None,
                 std_final_test_loss=_std(final_loss_values) if final_loss_values else None,
                 run_count=len(runs_only),
+                mean_epoch_1_accuracy=_mean(epoch_1_values) if epoch_1_values else None,
+                mean_epoch_3_accuracy=_mean(epoch_3_values) if epoch_3_values else None,
+                mean_epoch_10_accuracy=_mean(epoch_10_values) if epoch_10_values else None,
             )
         )
 
@@ -589,6 +617,35 @@ def _plot_seed_aggregated_accuracy(
     plt.title("MNIST Seed-Aggregated Test Accuracy")
     plt.legend()
     output_path = output_dir / "mnist_seed_aggregated_test_accuracy_vs_epoch.png"
+    _save_current_figure(output_path)
+    return output_path
+
+
+def _plot_seed_aggregated_loss(aggregates: list[AggregateData], output_dir: Path) -> Path | None:
+    plotted = [aggregate for aggregate in aggregates if aggregate.epochs]
+    if not plotted:
+        return None
+    plt.figure()
+    for aggregate in plotted:
+        plt.plot(
+            aggregate.epochs,
+            aggregate.mean_test_loss,
+            marker="o",
+            linewidth=2,
+            label=_display_label(aggregate.label),
+        )
+        lower = [
+            mean - std for mean, std in zip(aggregate.mean_test_loss, aggregate.std_test_loss)
+        ]
+        upper = [
+            mean + std for mean, std in zip(aggregate.mean_test_loss, aggregate.std_test_loss)
+        ]
+        plt.fill_between(aggregate.epochs, lower, upper, alpha=0.18)
+    plt.xlabel("Epoch")
+    plt.ylabel("Mean Test Loss")
+    plt.title("MNIST Seed-Aggregated Test Loss")
+    plt.legend()
+    output_path = output_dir / "mnist_seed_aggregated_test_loss_vs_epoch.png"
     _save_current_figure(output_path)
     return output_path
 
@@ -709,6 +766,9 @@ def _write_seed_aggregate_table(aggregates: list[AggregateData], output_dir: Pat
                 "std_final_test_accuracy",
                 "mean_final_test_loss",
                 "std_final_test_loss",
+                "mean_epoch_1_accuracy",
+                "mean_epoch_3_accuracy",
+                "mean_epoch_10_accuracy",
             ],
         )
         writer.writeheader()
@@ -725,6 +785,44 @@ def _write_seed_aggregate_table(aggregates: list[AggregateData], output_dir: Pat
                     "std_final_test_accuracy": aggregate.std_final_test_accuracy,
                     "mean_final_test_loss": aggregate.mean_final_test_loss,
                     "std_final_test_loss": aggregate.std_final_test_loss,
+                    "mean_epoch_1_accuracy": aggregate.mean_epoch_1_accuracy,
+                    "mean_epoch_3_accuracy": aggregate.mean_epoch_3_accuracy,
+                    "mean_epoch_10_accuracy": aggregate.mean_epoch_10_accuracy,
+                }
+            )
+    return output_path
+
+
+def _write_compact_summary_table(aggregates: list[AggregateData], output_dir: Path) -> Path | None:
+    if not aggregates:
+        return None
+    output_path = output_dir / "compact_summary_table.csv"
+    with output_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "optimizer",
+                "mean_best_test_accuracy",
+                "std_best_test_accuracy",
+                "mean_final_test_accuracy",
+                "std_final_test_accuracy",
+                "mean_epoch_1_accuracy",
+                "mean_epoch_3_accuracy",
+                "mean_epoch_10_accuracy",
+            ],
+        )
+        writer.writeheader()
+        for aggregate in aggregates:
+            writer.writerow(
+                {
+                    "optimizer": aggregate.label,
+                    "mean_best_test_accuracy": aggregate.mean_best_test_accuracy,
+                    "std_best_test_accuracy": aggregate.std_best_test_accuracy,
+                    "mean_final_test_accuracy": aggregate.mean_final_test_accuracy,
+                    "std_final_test_accuracy": aggregate.std_final_test_accuracy,
+                    "mean_epoch_1_accuracy": aggregate.mean_epoch_1_accuracy,
+                    "mean_epoch_3_accuracy": aggregate.mean_epoch_3_accuracy,
+                    "mean_epoch_10_accuracy": aggregate.mean_epoch_10_accuracy,
                 }
             )
     return output_path
@@ -767,6 +865,112 @@ def _write_benchmark_table(runs: list[RunData], output_dir: Path) -> Path:
                     "events_path": str(run.events_path) if run.events_path else "",
                 }
             )
+    return output_path
+
+
+def _find_aggregate(aggregates: list[AggregateData], label: str) -> AggregateData | None:
+    for aggregate in aggregates:
+        if aggregate.label == label:
+            return aggregate
+    return None
+
+
+def _format_delta(a: float | None, b: float | None) -> str:
+    if a is None or b is None:
+        return "n/a"
+    return f"{a - b:+.4f}"
+
+
+def _build_interpretation_lines(
+    runs: list[RunData], aggregates: list[AggregateData]
+) -> list[str]:
+    neuroplastic = _find_aggregate(aggregates, "neuroplastic")
+    grad_only = _find_aggregate(aggregates, "ablation_grad_only")
+    baselines = [
+        aggregate
+        for aggregate in aggregates
+        if aggregate.label in {"adam", "adamw", "sgd"}
+        and aggregate.mean_final_test_accuracy is not None
+    ]
+    lines = [
+        "# MNIST 3-Seed Interpretation",
+        "",
+        "## Answers",
+    ]
+
+    if neuroplastic is None:
+        lines.append("- Is NeuroPlastic stably competitive with baselines? Not answerable because no NeuroPlastic aggregate was found.")
+    elif not baselines:
+        lines.append("- Is NeuroPlastic stably competitive with baselines? Not answerable because no baseline aggregates were found.")
+    else:
+        best_baseline = max(baselines, key=lambda aggregate: aggregate.mean_final_test_accuracy or float("-inf"))
+        final_gap = (
+            (best_baseline.mean_final_test_accuracy or 0.0)
+            - (neuroplastic.mean_final_test_accuracy or 0.0)
+        )
+        best_gap = (
+            (best_baseline.mean_best_test_accuracy or 0.0)
+            - (neuroplastic.mean_best_test_accuracy or 0.0)
+        )
+        competitive = final_gap <= 0.02
+        verdict = "Yes" if competitive else "No"
+        lines.append(
+            "- Is NeuroPlastic stably competitive with baselines? "
+            f"{verdict}. Against the strongest baseline by mean final accuracy (`{best_baseline.label}`), "
+            f"the final-accuracy gap is {final_gap:.4f} and the best-accuracy gap is {best_gap:.4f}."
+        )
+
+    seed_pairs: list[tuple[int, float, float]] = []
+    if neuroplastic is not None and grad_only is not None:
+        runs_by_label_seed: dict[tuple[str, int], RunData] = {}
+        for run in runs:
+            base_label, seed = _split_seed_suffix(run.label)
+            if seed is not None:
+                runs_by_label_seed[(base_label, seed)] = run
+        shared_seeds = sorted(set(neuroplastic.seeds).intersection(grad_only.seeds))
+        for seed in shared_seeds:
+            full_run = runs_by_label_seed.get(("neuroplastic", seed))
+            grad_run = runs_by_label_seed.get(("ablation_grad_only", seed))
+            if full_run is None or grad_run is None:
+                continue
+            if (
+                full_run.final_test_accuracy is not None
+                and grad_run.final_test_accuracy is not None
+            ):
+                seed_pairs.append((seed, full_run.final_test_accuracy, grad_run.final_test_accuracy))
+
+    if neuroplastic is None or grad_only is None:
+        lines.append("- Does full NeuroPlastic consistently beat ablation_grad_only? Not answerable because one of the aggregates is missing.")
+        lines.append("- If not, how large is the remaining gap? n/a.")
+        return lines
+
+    all_seed_wins = bool(seed_pairs) and all(full > grad for _, full, grad in seed_pairs)
+    final_delta = _format_delta(neuroplastic.mean_final_test_accuracy, grad_only.mean_final_test_accuracy)
+    best_delta = _format_delta(neuroplastic.mean_best_test_accuracy, grad_only.mean_best_test_accuracy)
+    if all_seed_wins:
+        lines.append(
+            "- Does full NeuroPlastic consistently beat ablation_grad_only? "
+            f"Yes. NeuroPlastic is higher on all shared seeds for final accuracy, with mean deltas final={final_delta} and best={best_delta}."
+        )
+    else:
+        win_count = sum(1 for _, full, grad in seed_pairs if full > grad)
+        lines.append(
+            "- Does full NeuroPlastic consistently beat ablation_grad_only? "
+            f"No. It wins {win_count}/{len(seed_pairs) if seed_pairs else 0} shared seeds on final accuracy; "
+            f"mean deltas are final={final_delta} and best={best_delta}."
+        )
+    lines.append(
+        "- If not, how large is the remaining gap? "
+        f"Full minus grad-only is final={final_delta} and best={best_delta} in absolute accuracy."
+    )
+    return lines
+
+
+def _write_interpretation_note(
+    runs: list[RunData], aggregates: list[AggregateData], output_dir: Path
+) -> Path:
+    output_path = output_dir / "interpretation_note.md"
+    output_path.write_text("\n".join(_build_interpretation_lines(runs, aggregates)) + "\n", encoding="utf-8")
     return output_path
 
 
@@ -841,15 +1045,19 @@ def generate_paper_figures(results_dir: Path, output_dir: Path) -> dict[str, Any
     generated_files.append(table_path)
     for maybe_path in (
         _plot_seed_aggregated_accuracy(aggregates, output_dir),
+        _plot_seed_aggregated_loss(aggregates, output_dir),
         _plot_seed_aggregated_best_final_bar(aggregates, output_dir),
         _plot_seed_aggregated_early_convergence(aggregates, output_dir),
         _write_seed_aggregate_table(aggregates, output_dir),
+        _write_compact_summary_table(aggregates, output_dir),
     ):
         if maybe_path is not None:
             generated_files.append(maybe_path)
 
     notes_path = _write_run_notes(runs, aggregates, warnings, generated_files, output_dir)
     generated_files.append(notes_path)
+    interpretation_path = _write_interpretation_note(runs, aggregates, output_dir)
+    generated_files.append(interpretation_path)
 
     return {
         "runs_found": [run.label for run in runs],

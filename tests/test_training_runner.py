@@ -2,10 +2,9 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
 import torch
 import yaml
-
-import pytest
 
 pytestmark = pytest.mark.skipif(importlib.util.find_spec("torch") is None, reason="torch missing")
 
@@ -237,6 +236,59 @@ def test_run_experiment_persists_optimizer_diagnostics(tmp_path, monkeypatch):
     assert events[0]["optimizer_diagnostics"]["stabilization_norm_ratio"] == pytest.approx(0.8)
 
 
+def test_run_experiment_persists_tuning_metadata(tmp_path, monkeypatch):
+    from neuroplastic_optimizer.training.runner import run_experiment
+
+    def fake_build_dataloaders(dataset: str, batch_size: int, num_workers: int, **kwargs):
+        return [object()], [object()]
+
+    def fake_run_epoch(model, loader, criterion, optimizer, device, train: bool, **kwargs):
+        if hasattr(optimizer, "set_epoch"):
+            assert optimizer._current_epoch >= 1
+        if train:
+            return {"loss": 0.8, "accuracy": 0.7}, 1
+        return {"loss": 0.6, "accuracy": 0.75}, 0
+
+    monkeypatch.setattr(
+        "neuroplastic_optimizer.training.runner.build_dataloaders",
+        fake_build_dataloaders,
+    )
+    monkeypatch.setattr("neuroplastic_optimizer.training.runner._run_epoch", fake_run_epoch)
+
+    experiment = {
+        "dataset": "synthetic_mnist",
+        "batch_size": 2,
+        "epochs": 1,
+        "lr": 0.01,
+        "weight_decay": 0.0,
+        "optimizer": "neuroplastic",
+        "seed": 123,
+        "num_workers": 0,
+        "output_dir": str(tmp_path / "results"),
+        "checkpoint_dir": str(tmp_path / "checkpoints"),
+        "device": "cpu",
+        "run_name": "metadata_case",
+        "save_every_n_epochs": 1,
+        "save_best_only": False,
+    }
+    plasticity = {"plasticity_scale": 2.0, "warmup_epochs": 2}
+
+    config_path = tmp_path / "metadata.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"experiment": experiment, "plasticity": plasticity}),
+        encoding="utf-8",
+    )
+
+    summary = run_experiment(str(config_path))
+
+    metrics_path = tmp_path / "results" / "metadata_case_synthetic_mnist_neuroplastic_metrics.json"
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert metrics["plasticity_config"]["plasticity_scale"] == pytest.approx(2.0)
+    assert metrics["plasticity_config"]["warmup_epochs"] == 2
+    assert metrics["run_metadata"]["model_identifier"] == "mlp_classifier_784_256_10"
+    assert summary["run_metadata"]["result_directory"] == str((tmp_path / "results").resolve())
+
+
 def test_run_experiment_flushes_metrics_on_exception(tmp_path, monkeypatch):
     from neuroplastic_optimizer.training.runner import run_experiment
 
@@ -372,3 +424,13 @@ def test_run_experiment_validates_before_model_construction(tmp_path, monkeypatc
         run_experiment(str(config_path))
 
     assert called["model"] is False
+
+
+def test_model_identifier_and_factory_support_cifar10():
+    from neuroplastic_optimizer.models.cnn import SmallCIFARNet
+    from neuroplastic_optimizer.training.runner import _make_model, _model_identifier
+
+    model = _make_model("cifar10")
+
+    assert isinstance(model, SmallCIFARNet)
+    assert _model_identifier("cifar10") == "small_cifar_net"

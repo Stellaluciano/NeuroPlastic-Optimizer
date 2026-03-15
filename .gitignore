@@ -9,12 +9,15 @@ __pycache__/
 htmlcov/
 artifacts/
 checkpoints/
+checkpoints_*/
 checkpoints_after_fix/
 data/
 paper_artifacts/
+figures/
 results/*.json
 results/*.jsonl
 results/*.png
+results_*/
 results_after_fix/
 .pytest_tmp*/
 .DS_Store

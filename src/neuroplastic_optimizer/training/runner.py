@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import random
+import subprocess
 import time
-from dataclasses import asdict
-from pathlib import Path
 from contextlib import nullcontext
+from dataclasses import asdict
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -120,6 +122,57 @@ def _build_checkpoint(
 def _artifact_stem(config_path: str, cfg: ExperimentConfig) -> str:
     run_name = cfg.run_name or Path(config_path).stem
     return f"{run_name}_{cfg.dataset}_{cfg.optimizer}"
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _model_identifier(dataset: str) -> str:
+    if dataset in {"mnist", "fashionmnist", "synthetic_mnist"}:
+        return "mlp_classifier_784_256_10"
+    if dataset == "cifar10":
+        return "small_cifar_net"
+    return f"unknown_model_for_{dataset}"
+
+
+def _git_commit_hash() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=_repo_root(),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
+
+
+def _build_run_metadata(
+    cfg: ExperimentConfig,
+    plasticity_cfg: PlasticityConfig,
+) -> dict[str, Any]:
+    return {
+        "optimizer_name": cfg.optimizer,
+        "lr": cfg.lr,
+        "warmup_epochs": plasticity_cfg.warmup_epochs,
+        "plasticity_scale": plasticity_cfg.plasticity_scale,
+        "seed": cfg.seed,
+        "epochs": cfg.epochs,
+        "dataset": cfg.dataset,
+        "model_identifier": _model_identifier(cfg.dataset),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "git_commit_hash": _git_commit_hash(),
+        "result_directory": str(Path(cfg.output_dir).resolve()),
+        "checkpoint_directory": str(Path(cfg.checkpoint_dir).resolve()),
+        "run_name": cfg.run_name,
+        "config_path": None,
+        "tags": dict(cfg.tags) if cfg.tags is not None else None,
+        "train_subset_indices_path": cfg.train_subset_indices_path,
+    }
 
 
 def _resolve_device(requested_device: str) -> torch.device:
@@ -260,6 +313,7 @@ def run_experiment(config_path: str) -> dict[str, Any]:
         pin_memory=cfg.pin_memory,
         persistent_workers=cfg.persistent_workers,
         prefetch_factor=cfg.prefetch_factor,
+        train_subset_indices_path=cfg.train_subset_indices_path,
     )
     model = _make_model(cfg.dataset).to(device)
     criterion = nn.CrossEntropyLoss()
@@ -294,15 +348,6 @@ def run_experiment(config_path: str) -> dict[str, Any]:
         best_metric = float(checkpoint.get("best_metric", best_metric))
         global_update_step = int(checkpoint.get("global_update_step", global_update_step))
 
-    history: dict[str, Any] = {
-        "train": [],
-        "test": [],
-        "optimizer_diagnostics": [],
-        "config": asdict(cfg),
-        "device": str(device),
-        "distributed": distributed_state,
-    }
-
     out_dir = Path(cfg.output_dir)
     ckpt_dir = Path(cfg.checkpoint_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -313,11 +358,42 @@ def run_experiment(config_path: str) -> dict[str, Any]:
     metrics_path = out_dir / f"{stem}_metrics.json"
     events_path = out_dir / f"{stem}_events.jsonl"
     logger = _build_logger(cfg)
+    run_metadata = _build_run_metadata(cfg, parsed.plasticity)
+    run_metadata["config_path"] = str(Path(config_path).resolve())
+    run_metadata["train_dataset_size"] = len(train_loader.dataset)
+    run_metadata["test_dataset_size"] = len(test_loader.dataset)
+
+    history: dict[str, Any] = {
+        "train": [],
+        "test": [],
+        "optimizer_diagnostics": [],
+        "config": asdict(cfg),
+        "plasticity_config": asdict(parsed.plasticity),
+        "homeostatic_config": asdict(parsed.homeostatic),
+        "device": str(device),
+        "distributed": distributed_state,
+        "run_metadata": run_metadata,
+    }
+    if cfg.resume_from is not None and metrics_path.exists():
+        try:
+            existing_history = json.loads(metrics_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            existing_history = None
+        if isinstance(existing_history, dict):
+            history = existing_history
+            history["config"] = asdict(cfg)
+            history["plasticity_config"] = asdict(parsed.plasticity)
+            history["homeostatic_config"] = asdict(parsed.homeostatic)
+            history["device"] = str(device)
+            history["distributed"] = distributed_state
+            history["run_metadata"] = run_metadata
 
     with open(events_path, "a", encoding="utf-8") as events_file:
         try:
             for epoch in range(start_epoch, cfg.epochs + 1):
                 epoch_start = time.perf_counter()
+                if hasattr(optimizer, "set_epoch"):
+                    optimizer.set_epoch(epoch)
                 train_metrics, update_steps = _run_epoch(
                     model,
                     train_loader,
@@ -410,7 +486,10 @@ def run_experiment(config_path: str) -> dict[str, Any]:
         "last_test_loss": last_test_loss,
         "optimizer": cfg.optimizer,
         "dataset": cfg.dataset,
+        "device": str(device),
         "checkpoint": str(checkpoint_path),
+        "result_directory": str(out_dir.resolve()),
+        "run_metadata": run_metadata,
         "global_update_step": global_update_step,
     }
     with open(out_dir / f"{stem}_summary.json", "w", encoding="utf-8") as file_obj:

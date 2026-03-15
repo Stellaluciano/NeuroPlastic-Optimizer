@@ -133,3 +133,112 @@ def test_optimizer_collects_lightweight_diagnostics():
     }
     assert required.issubset(diagnostics.keys())
     assert diagnostics["raw_gradient_norm"] > 0
+
+
+def test_full_neuroplastic_warmup_gate_matches_grad_only_on_first_warmup_epoch():
+    import torch
+
+    from neuroplastic_optimizer.optimizer import NeuroPlasticOptimizer
+    from neuroplastic_optimizer.plasticity import PlasticityConfig, PlasticityMode
+    from neuroplastic_optimizer.stabilization import HomeostaticConfig
+
+    def make_param() -> torch.nn.Parameter:
+        return torch.nn.Parameter(torch.tensor([1.0, -2.0], dtype=torch.float32))
+
+    grad = torch.tensor([0.5, -0.25], dtype=torch.float32)
+    homeostatic = HomeostaticConfig(max_update_norm=1e9, adaptation_rate=0.0)
+
+    full_param = make_param()
+    grad_only_param = make_param()
+    full_param.grad = grad.clone()
+    grad_only_param.grad = grad.clone()
+
+    full = NeuroPlasticOptimizer(
+        [full_param],
+        lr=0.1,
+        plasticity_config=PlasticityConfig(
+            mode=PlasticityMode.RULE_BASED,
+            warmup_epochs=1,
+            plasticity_scale=1.0,
+            min_alpha=0.0,
+            max_alpha=10.0,
+        ),
+        homeostatic_config=homeostatic,
+    )
+    grad_only = NeuroPlasticOptimizer(
+        [grad_only_param],
+        lr=0.1,
+        plasticity_config=PlasticityConfig(
+            mode=PlasticityMode.ABLATION_GRAD_ONLY,
+            min_alpha=0.0,
+            max_alpha=10.0,
+        ),
+        homeostatic_config=homeostatic,
+    )
+
+    full.set_epoch(1)
+    full.step()
+    grad_only.step()
+
+    assert torch.allclose(full_param.detach(), grad_only_param.detach(), atol=1e-6)
+
+
+def test_plasticity_scale_zero_reduces_full_mode_to_grad_only_path():
+    import torch
+
+    from neuroplastic_optimizer.optimizer import NeuroPlasticOptimizer
+    from neuroplastic_optimizer.plasticity import PlasticityConfig, PlasticityMode
+    from neuroplastic_optimizer.stabilization import HomeostaticConfig
+
+    def make_param() -> torch.nn.Parameter:
+        return torch.nn.Parameter(torch.tensor([0.25, -0.75], dtype=torch.float32))
+
+    grad = torch.tensor([0.4, -0.1], dtype=torch.float32)
+    homeostatic = HomeostaticConfig(max_update_norm=1e9, adaptation_rate=0.0)
+
+    full_zero = make_param()
+    grad_only_param = make_param()
+    full_scaled = make_param()
+    full_zero.grad = grad.clone()
+    grad_only_param.grad = grad.clone()
+    full_scaled.grad = grad.clone()
+
+    zero_scale_opt = NeuroPlasticOptimizer(
+        [full_zero],
+        lr=0.05,
+        plasticity_config=PlasticityConfig(
+            mode=PlasticityMode.RULE_BASED,
+            plasticity_scale=0.0,
+            min_alpha=0.0,
+            max_alpha=10.0,
+        ),
+        homeostatic_config=homeostatic,
+    )
+    grad_only_opt = NeuroPlasticOptimizer(
+        [grad_only_param],
+        lr=0.05,
+        plasticity_config=PlasticityConfig(
+            mode=PlasticityMode.ABLATION_GRAD_ONLY,
+            min_alpha=0.0,
+            max_alpha=10.0,
+        ),
+        homeostatic_config=homeostatic,
+    )
+    scaled_opt = NeuroPlasticOptimizer(
+        [full_scaled],
+        lr=0.05,
+        plasticity_config=PlasticityConfig(
+            mode=PlasticityMode.RULE_BASED,
+            plasticity_scale=2.0,
+            min_alpha=0.0,
+            max_alpha=10.0,
+        ),
+        homeostatic_config=homeostatic,
+    )
+
+    zero_scale_opt.step()
+    grad_only_opt.step()
+    scaled_opt.step()
+
+    assert torch.allclose(full_zero.detach(), grad_only_param.detach(), atol=1e-6)
+    assert not torch.allclose(full_scaled.detach(), grad_only_param.detach(), atol=1e-6)

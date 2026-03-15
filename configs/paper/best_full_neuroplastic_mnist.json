@@ -1,0 +1,35 @@
+{
+  "study_name": "mnist_full_tuning_clean",
+  "dataset": "mnist",
+  "optimizer_name": "neuroplastic",
+  "lr": 0.1,
+  "warmup_epochs": 2,
+  "plasticity_scale": 2.0,
+  "selected_by": "mean_final_test_accuracy",
+  "selection_reason": "Selected because mean final test accuracy is the primary ranking metric for downstream follow-up benchmarks.",
+  "comparison_to_baseline": {
+    "comparison_mode": "seed_aware",
+    "baseline_present": true,
+    "best_full_by_final_accuracy": {
+      "optimizer_name": "neuroplastic",
+      "lr": 0.1,
+      "warmup_epochs": 2,
+      "plasticity_scale": 2.0,
+      "mean_final_test_accuracy": 0.9745666666666667
+    },
+    "best_full_by_best_accuracy": {
+      "optimizer_name": "neuroplastic",
+      "lr": 0.1,
+      "warmup_epochs": 0,
+      "plasticity_scale": 2.0,
+      "mean_best_test_accuracy": 0.9766666666666667
+    },
+    "mean_final_accuracy_gap_vs_baseline": 0.0010000000000000009,
+    "mean_best_accuracy_gap_vs_baseline": 0.0007666666666668043,
+    "mean_final_loss_gap_vs_baseline": -0.0019568699003818107,
+    "final_seed_wins": 3,
+    "best_seed_wins": 2,
+    "shared_seed_count": 3,
+    "robustness": "marginal"
+  }
+}

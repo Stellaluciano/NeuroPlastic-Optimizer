@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from typing import Any
 
 import torch
 
-from neuroplastic_optimizer.plasticity import PlasticityConfig, compute_plasticity
+from neuroplastic_optimizer.plasticity import (
+    PlasticityConfig,
+    PlasticityMode,
+    compute_plasticity,
+)
 from neuroplastic_optimizer.stabilization import HomeostaticConfig, HomeostaticStabilizer
 from neuroplastic_optimizer.state import ParameterStateMemory
 from neuroplastic_optimizer.traces import ActivityTraceExtractor
@@ -25,11 +30,27 @@ class NeuroPlasticOptimizer(torch.optim.Optimizer):
         defaults = dict(lr=lr, weight_decay=weight_decay)
         super().__init__(params, defaults)
         self.plasticity_config = plasticity_config or PlasticityConfig()
+        self._grad_only_config = replace(
+            self.plasticity_config,
+            mode=PlasticityMode.ABLATION_GRAD_ONLY,
+        )
         self.state_memory = ParameterStateMemory()
         self.trace_extractor = ActivityTraceExtractor()
         self.stabilizer = HomeostaticStabilizer(homeostatic_config)
         self._diagnostic_bins = 64
+        self._current_epoch = 1
         self.reset_diagnostics()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._current_epoch = max(1, int(epoch))
+
+    def _plasticity_warmup_gate(self) -> float:
+        warmup_epochs = self.plasticity_config.warmup_epochs
+        if self.plasticity_config.mode is PlasticityMode.ABLATION_GRAD_ONLY:
+            return 0.0
+        if warmup_epochs <= 0:
+            return 1.0
+        return min(max((self._current_epoch - 1) / warmup_epochs, 0.0), 1.0)
 
     def reset_diagnostics(self) -> None:
         self._diagnostics: dict[str, Any] = {
@@ -119,14 +140,34 @@ class NeuroPlasticOptimizer(torch.optim.Optimizer):
                 state["activity_trace"] = self.trace_extractor.update(state["activity_trace"], grad)
                 self.state_memory.update_stats(state, grad)
 
-                alpha = compute_plasticity(
+                grad_only_alpha = compute_plasticity(
                     grad=grad,
                     activity_trace=state["activity_trace"],
                     momentum=state["momentum"],
                     variance=state["variance"],
-                    config=self.plasticity_config,
+                    config=self._grad_only_config,
                 )
+                alpha = grad_only_alpha
+                if self.plasticity_config.mode is not PlasticityMode.ABLATION_GRAD_ONLY:
+                    full_alpha = compute_plasticity(
+                        grad=grad,
+                        activity_trace=state["activity_trace"],
+                        momentum=state["momentum"],
+                        variance=state["variance"],
+                        config=self.plasticity_config,
+                    )
+                    plasticity_gate = self._plasticity_warmup_gate()
+                    plasticity_delta = full_alpha - grad_only_alpha
+                    alpha = grad_only_alpha + (
+                        plasticity_gate
+                        * self.plasticity_config.plasticity_scale
+                        * plasticity_delta
+                    )
 
+                # `grad_only_alpha * grad` is the gradient-only ablation path.
+                # `(alpha - grad_only_alpha) * grad` is the extra plasticity contribution.
+                # Warmup linearly ramps that extra term from 0 to full strength
+                # across the configured warmup epochs.
                 update = alpha * grad
                 if wd > 0:
                     update = update + wd * p
