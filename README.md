@@ -92,6 +92,99 @@ python scripts/plot_results.py --result-files \
   results/sgd_mnist_sgd_metrics.json
 ```
 
+## Focused MNIST tuning study
+
+This repository also includes a targeted follow-up study for the question: `Can full NeuroPlastic outperform the grad-only ablation after targeted tuning?`
+
+Run the tuning sweep:
+
+```bash
+python scripts/paper_figures/run_cpu_mnist_full_tuning_pipeline.py --epochs 10 --seeds 3 --skip-smoke
+```
+
+Generate the paper-ready tuning bundle:
+
+```bash
+python scripts/paper_figures/generate_mnist_full_tuning_figures.py --results-dir results_mnist_full_tuning_clean --output-dir paper_artifacts/mnist_full_tuning_clean
+```
+
+Outputs are written to dedicated directories so the existing clean MNIST paper artifacts remain unchanged:
+
+- `results_mnist_full_tuning_clean/`
+- `checkpoints_mnist_full_tuning_clean/`
+- `paper_artifacts/mnist_full_tuning_clean/`
+
+Current interpretation:
+`On the completed MNIST partial study, full NeuroPlastic shows a small but consistent advantage over the grad-only ablation under the best finished tuning setting, but the gain is currently marginal and requires confirmation from the remaining sweep and a second dataset.`
+
+## Fashion-MNIST validation study
+
+After the final MNIST tuning study selects one recommended full NeuroPlastic config, validate that config against the grad-only ablation on Fashion-MNIST:
+
+```bash
+python scripts/paper_figures/run_cpu_fashionmnist_bestfull_vs_gradonly.py --epochs 10 --seeds 3 --skip-smoke --best-config configs/paper/best_full_neuroplastic_mnist.json
+```
+
+```bash
+python scripts/paper_figures/generate_fashionmnist_bestfull_vs_gradonly_figures.py --results-dir results_fashionmnist_bestfull_vs_gradonly_clean --output-dir paper_artifacts/fashionmnist_bestfull_vs_gradonly_clean --best-config configs/paper/best_full_neuroplastic_mnist.json
+```
+
+Outputs are written to:
+
+- `results_fashionmnist_bestfull_vs_gradonly_clean/`
+- `checkpoints_fashionmnist_bestfull_vs_gradonly_clean/`
+- `paper_artifacts/fashionmnist_bestfull_vs_gradonly_clean/`
+
+## Current paper narrative
+
+Full NeuroPlastic currently shows a small reproducible gain over the gradient-only ablation on MNIST, while the effect is stronger and more consistent on Fashion-MNIST. The next paper checks are therefore a locked-config CIFAR-10 validation and a low-data regime study to test whether the plasticity-inspired advantage becomes clearer when training data is limited.
+
+Current evidence summary:
+
+- MNIST: the locked best full config is slightly better than `ablation_grad_only` on mean final accuracy, mean best accuracy, and final loss, but the effect is marginal.
+- Fashion-MNIST: the same locked best full config is more clearly better than `ablation_grad_only`, with stronger mean gaps and clean shared-seed wins.
+- Next benchmarks: validate the same locked config on CIFAR-10 and measure the gap across `{0.1, 0.25, 0.5, 1.0}` data fractions.
+
+## CIFAR-10 locked-config validation
+
+Run the clean CIFAR-10 comparison:
+
+```bash
+python scripts/paper_figures/run_cifar10_bestfull_vs_gradonly.py --epochs 10 --seeds 3 --skip-smoke --best-config configs/paper/best_full_neuroplastic_mnist.json --output-root results_cifar10_bestfull_vs_gradonly_clean
+```
+
+Generate the CIFAR-10 artifact bundle:
+
+```bash
+python scripts/paper_figures/generate_cifar10_bestfull_vs_gradonly_figures.py --results-dir results_cifar10_bestfull_vs_gradonly_clean --output-dir paper_artifacts/cifar10_bestfull_vs_gradonly_clean --best-config configs/paper/best_full_neuroplastic_mnist.json
+```
+
+Outputs are written to:
+
+- `results_cifar10_bestfull_vs_gradonly_clean/`
+- `checkpoints_cifar10_bestfull_vs_gradonly_clean/`
+- `paper_artifacts/cifar10_bestfull_vs_gradonly_clean/`
+
+## Low-data best-full vs grad-only study
+
+Run the default low-data Fashion-MNIST comparison:
+
+```bash
+python scripts/paper_figures/run_low_data_bestfull_vs_gradonly.py --dataset fashionmnist --fractions 0.1 0.25 0.5 1.0 --epochs 10 --seeds 3 --skip-smoke --best-config configs/paper/best_full_neuroplastic_mnist.json --output-root results_low_data_fashionmnist_bestfull_vs_gradonly_clean
+```
+
+Generate the low-data artifact bundle:
+
+```bash
+python scripts/paper_figures/generate_low_data_bestfull_vs_gradonly_figures.py --results-dir results_low_data_fashionmnist_bestfull_vs_gradonly_clean --output-dir paper_artifacts/low_data_fashionmnist_bestfull_vs_gradonly_clean --dataset fashionmnist
+```
+
+Outputs are written to:
+
+- `results_low_data_fashionmnist_bestfull_vs_gradonly_clean/`
+- `checkpoints_low_data_fashionmnist_bestfull_vs_gradonly_clean/`
+- `paper_artifacts/low_data_fashionmnist_bestfull_vs_gradonly_clean/`
+
 ## Reproducibility and artifacts
 
 Every run writes:

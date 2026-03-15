@@ -17,6 +17,8 @@ class PlasticityConfig:
     activity_weight: float = 0.4
     gradient_weight: float = 0.4
     memory_weight: float = 0.2
+    plasticity_scale: float = 1.0
+    warmup_epochs: int = 0
     min_alpha: float = 0.2
     max_alpha: float = 2.0
     layerwise: bool = True

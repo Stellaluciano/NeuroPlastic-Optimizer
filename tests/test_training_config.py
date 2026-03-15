@@ -64,7 +64,10 @@ def test_experiment_config_validation_rejects_unsupported_amp_dtype():
         ("device", "tpu"),
     ],
 )
-def test_experiment_config_validation_rejects_scheduler_and_device_variants(field_name, field_value):
+def test_experiment_config_validation_rejects_scheduler_and_device_variants(
+    field_name,
+    field_value,
+):
     from neuroplastic_optimizer.training.config import ExperimentConfig
 
     cfg = ExperimentConfig(**{field_name: field_value})
@@ -101,6 +104,8 @@ def test_parse_and_validate_training_config_rejects_unknown_fields(payload):
         {"activity_weight": -0.1, "gradient_weight": 0.9, "memory_weight": 0.2},
         {"activity_weight": 0.5, "gradient_weight": 0.5, "memory_weight": 0.2},
         {"min_alpha": 2.0, "max_alpha": 1.0},
+        {"plasticity_scale": -1.0},
+        {"warmup_epochs": -1},
     ],
 )
 def test_parse_and_validate_training_config_rejects_invalid_plasticity(plasticity):
@@ -108,6 +113,21 @@ def test_parse_and_validate_training_config_rejects_invalid_plasticity(plasticit
 
     with pytest.raises(ValueError):
         parse_and_validate_training_config({"experiment": {}, "plasticity": plasticity})
+
+
+def test_parse_and_validate_training_config_accepts_tuning_fields():
+    from neuroplastic_optimizer.training.config import parse_and_validate_training_config
+
+    parsed = parse_and_validate_training_config(
+        {
+            "experiment": {},
+            "plasticity": {"plasticity_scale": 2.0, "warmup_epochs": 2, "eps": 1e-6},
+        }
+    )
+
+    assert parsed.plasticity.plasticity_scale == 2.0
+    assert parsed.plasticity.warmup_epochs == 2
+    assert parsed.plasticity.eps == 1e-6
 
 
 @pytest.mark.parametrize(

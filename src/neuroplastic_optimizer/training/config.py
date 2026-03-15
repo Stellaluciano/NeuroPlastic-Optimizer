@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from difflib import get_close_matches
-from typing import Any, Mapping
+from typing import Any
 
 from neuroplastic_optimizer.plasticity import PlasticityConfig, PlasticityMode
 from neuroplastic_optimizer.stabilization import HomeostaticConfig
@@ -66,7 +67,9 @@ class ExperimentConfig:
     amp_dtype: str = "fp16"
     gradient_accumulation_steps: int = 1
     run_name: str | None = None
+    tags: dict[str, Any] | None = None
     resume_from: str | None = None
+    train_subset_indices_path: str | None = None
     save_every_n_epochs: int = 1
     save_best_only: bool = False
     log_level: str = "INFO"
@@ -88,7 +91,8 @@ class ExperimentConfig:
             raise ValueError(f"unsupported optimizer: {self.optimizer}")
         if self.scheduler is not None and self.scheduler not in ALLOWED_SCHEDULERS:
             raise ValueError(
-                f"unsupported scheduler: {self.scheduler}. Supported schedulers: {sorted(ALLOWED_SCHEDULERS)}"
+                "unsupported scheduler: "
+                f"{self.scheduler}. Supported schedulers: {sorted(ALLOWED_SCHEDULERS)}"
             )
         if not (0.0 < self.scheduler_gamma <= 1.0):
             raise ValueError("scheduler_gamma must be in (0, 1]")
@@ -101,6 +105,8 @@ class ExperimentConfig:
             raise ValueError(f"unsupported log_level: {self.log_level}")
         if self.amp_dtype not in {"fp16", "bf16"}:
             raise ValueError(f"unsupported amp_dtype: {self.amp_dtype}")
+        if self.tags is not None and not isinstance(self.tags, Mapping):
+            raise ValueError("tags must be a mapping/object when provided")
         _validate_device(self.device)
 
 
@@ -110,10 +116,16 @@ def validate_plasticity_config(config: PlasticityConfig) -> None:
     weight_sum = config.activity_weight + config.gradient_weight + config.memory_weight
     if abs(weight_sum - 1.0) > 1e-6:
         raise ValueError("plasticity weights must sum to 1.0")
+    if config.plasticity_scale < 0:
+        raise ValueError("plasticity_scale must be >= 0")
+    if config.warmup_epochs < 0:
+        raise ValueError("warmup_epochs must be >= 0")
     if config.min_alpha > config.max_alpha:
         raise ValueError("plasticity min_alpha must be <= max_alpha")
     if config.min_alpha <= 0 or config.max_alpha <= 0:
         raise ValueError("plasticity alpha bounds must be > 0")
+    if config.eps <= 0:
+        raise ValueError("plasticity eps must be > 0")
 
 
 def validate_homeostatic_config(config: HomeostaticConfig) -> None:
@@ -134,10 +146,13 @@ def plasticity_config_from_dict(data: dict) -> PlasticityConfig:
         activity_weight=float(data.get("activity_weight", 0.4)),
         gradient_weight=float(data.get("gradient_weight", 0.4)),
         memory_weight=float(data.get("memory_weight", 0.2)),
+        plasticity_scale=float(data.get("plasticity_scale", 1.0)),
+        warmup_epochs=int(data.get("warmup_epochs", 0)),
         min_alpha=float(data.get("min_alpha", 0.2)),
         max_alpha=float(data.get("max_alpha", 2.0)),
         layerwise=bool(data.get("layerwise", True)),
         parameterwise=bool(data.get("parameterwise", True)),
+        eps=float(data.get("eps", 1e-8)),
     )
     validate_plasticity_config(config)
     return config
@@ -195,4 +210,8 @@ def parse_and_validate_training_config(raw: Mapping[str, Any]) -> TrainingConfig
     experiment.validate()
     plasticity = plasticity_config_from_dict(plasticity_data)
     homeostatic = homeostatic_config_from_dict(homeostatic_data)
-    return TrainingConfigSchema(experiment=experiment, plasticity=plasticity, homeostatic=homeostatic)
+    return TrainingConfigSchema(
+        experiment=experiment,
+        plasticity=plasticity,
+        homeostatic=homeostatic,
+    )
